@@ -70,9 +70,9 @@ impl<'a, K: 'a + key_interface::KeyInterface + std::cmp::PartialEq, V> Art<K, V>
                     Self::insert_record(child, depth + prefix_match_len + 1, key, value);
                 }
                 ptr.to_art_node()
-            } /*else if ptr.is_full() {
-                //TODO convert this to bigger node and insert
-            }*/ else {
+            } else if ptr.is_full() {
+                ptr.grow_and_add(art_nodes::ArtNodeEnum::create_leaf(key, value), next_byte)
+            } else {
                 ptr.add_child(art_nodes::ArtNodeEnum::create_leaf(key, value), next_byte);
                 ptr.to_art_node()
             }
@@ -90,12 +90,14 @@ impl<'a, K: 'a + key_interface::KeyInterface + std::cmp::PartialEq, V> Art<K, V>
             let lkey = lleaf.key();
 
             let mut lcp = depth;
-            let max_lcp = std::cmp::min(constants::PREFIX_LENGTH_LIMIT, key.bytes().len());
+            let mut max_lcp = std::cmp::min(constants::PREFIX_LENGTH_LIMIT, key.bytes().len());
+            max_lcp = std::cmp::min(max_lcp, lkey.bytes().len());
 
             while lcp < max_lcp && lkey.bytes()[lcp] == key.bytes()[lcp] {
                 lcp += 1;
             }
 
+            println!("lcp value is {}",lcp);
             if lcp > depth {
                 unsafe {
                     std::ptr::copy(
@@ -107,7 +109,17 @@ impl<'a, K: 'a + key_interface::KeyInterface + std::cmp::PartialEq, V> Art<K, V>
             }
 
             new_node.n.partial_len = lcp - depth;
+            if lcp == max_lcp {
+                lcp = lcp - 1;
+            }
 
+            if lcp >= lkey.bytes().len() {
+                lcp = lkey.bytes().len() - 1;
+            }
+
+            if lcp >= key.bytes().len() {
+                lcp = key.bytes().len() - 1;
+            }
             (lkey.bytes()[lcp], key.bytes()[lcp])
         };
 
@@ -121,6 +133,9 @@ impl<'a, K: 'a + key_interface::KeyInterface + std::cmp::PartialEq, V> Art<K, V>
         *root = match mem::replace(root, art_nodes::ArtNodeEnum::Empty) {
             art_nodes::ArtNodeEnum::Empty => art_nodes::ArtNodeEnum::create_leaf(key, value),
             art_nodes::ArtNodeEnum::Inner4(ptr) => Self::internal_node_insert(ptr, depth, key, value),
+            art_nodes::ArtNodeEnum::Inner16(ptr) => Self::internal_node_insert(ptr, depth, key, value),
+            art_nodes::ArtNodeEnum::Inner48(ptr) => Self::internal_node_insert(ptr, depth, key, value),
+            art_nodes::ArtNodeEnum::Inner256(ptr) => Self::internal_node_insert(ptr, depth, key, value),
             leaf => Self::leaf_node_insert(leaf, key, value, depth),
         };
     }
@@ -128,5 +143,42 @@ impl<'a, K: 'a + key_interface::KeyInterface + std::cmp::PartialEq, V> Art<K, V>
     pub fn insert(&mut self, key: K, value: V) {
         Self::insert_record(&mut self.root, 0, key, value);
         self.size += 1;
+    }
+
+    #[inline]
+    fn search_inner<N: ArtNodeInterface<K,V>>(ptr: &'a N, key: &K, depth: usize) -> Option<&'a V> {
+        let lcp = ptr.base().compute_prefix_match(key, depth);
+
+        if lcp != ptr.base().partial_len {
+            return None;
+        }
+
+        if let Some(ref child) = ptr.find_child(key.bytes()[depth + lcp]) {
+            return Self::search_rec(child, key, depth + lcp + 1);
+        }
+
+        None
+    }
+
+    fn search_rec(root: &'a art_nodes::ArtNodeEnum<K,V>, key: &K, depth: usize) -> Option<&'a V> {
+        match root {
+            &art_nodes::ArtNodeEnum::Empty => None,
+            &art_nodes::ArtNodeEnum::LeafNode(ref ptr) => if ptr.0 == *key {
+                Some(&ptr.1)
+            } else {
+                None
+            }
+            &art_nodes::ArtNodeEnum::Inner4(ref ptr) => Self::search_inner(&**ptr, key, depth),
+
+            &art_nodes::ArtNodeEnum::Inner16(ref ptr) => Self::search_inner(&**ptr, key, depth),
+
+            &art_nodes::ArtNodeEnum::Inner48(ref ptr) => Self::search_inner(&**ptr, key, depth),
+
+            &art_nodes::ArtNodeEnum::Inner256(ref ptr) => Self::search_inner(&**ptr, key, depth),
+        }
+    }
+
+    pub fn get(&self, key: &K) -> Option<&V> {
+        Self::search_rec(&self.root, key, 0)
     }
 }
