@@ -1,10 +1,16 @@
 use crate::key_interface;
 use crate::node4;
+use crate::node16;
+use crate::node48;
+use crate::node256;
 
 pub enum ArtNodeEnum<K, V> {
     Empty,
 
     Inner4(Box<node4::NodeType4<K, V>>),
+    Inner16(Box<node16::NodeType16<K, V>>),
+    Inner48(Box<node48::NodeType48<K, V>>),
+    Inner256(Box<node256::NodeType256<K, V>>),
 
     LeafNode(Box<(K,V)>),
 }
