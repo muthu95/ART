@@ -140,7 +140,7 @@ impl<'a, K: 'a + key_interface::KeyInterface + std::cmp::PartialEq, V> Art<K, V>
         };
     }
 
-    pub fn insert(&mut self, key: K, value: V) {
+    pub fn insert_key(&mut self, key: K, value: V) {
         Self::insert_record(&mut self.root, 0, key, value);
         self.size += 1;
     }
@@ -180,5 +180,65 @@ impl<'a, K: 'a + key_interface::KeyInterface + std::cmp::PartialEq, V> Art<K, V>
 
     pub fn get(&self, key: &K) -> Option<&V> {
         Self::search_rec(&self.root, key, 0)
+    }
+
+    fn leaf_node_delete(leaf: art_nodes::ArtNodeEnum<K,V>, key: &K) -> Option<V> {
+        if *key == *leaf.key() {
+            Some(leaf.value())
+        } else {
+            None
+        }
+    }
+
+    fn internal_node_delete<N>(mut ptr: Box<N>, depth: usize, key: &K)-> (art_nodes::ArtNodeEnum<K,V>, Option<V>)
+        where N: ArtNodeInterface<K,V>
+    {
+        let prefix_match_len = ptr.base().compute_prefix_match(key, depth);
+        let next_byte = key.bytes()[depth + prefix_match_len];
+
+        if prefix_match_len != ptr.base().partial_len || !ptr.has_child(next_byte) {
+            (ptr.to_art_node(), None)
+        } else {
+            let ret = Self::delete_record(ptr.find_child_mut(next_byte), depth + prefix_match_len + 1, key);
+
+            if let Some(&art_nodes::ArtNodeEnum::Empty) = ptr.find_child(next_byte) {
+                // TODO: This is weird API, clean_child is called after the child has already been removed.
+                //       Why does remove_child return should_shrink?
+                //       Do this for now, but lets focus on this sometimes.
+                //
+                let should_shrink = ptr.clean_child(next_byte);
+
+                if should_shrink {
+                    // TODO: After shrink happens, we should recalculate partial
+                    return (ptr.shrink(), ret);
+                }
+            }
+
+            (ptr.to_art_node(), ret)
+        }
+    }
+
+    fn delete_record(root: &mut art_nodes::ArtNodeEnum<K,V>, depth: usize, key: &K) -> Option<V> {
+        let (new_root, ret) = match mem::replace(root, art_nodes::ArtNodeEnum::Empty) {
+            art_nodes::ArtNodeEnum::Empty => (art_nodes::ArtNodeEnum::Empty, None),
+
+            art_nodes::ArtNodeEnum::Inner4(ptr) => Self::internal_node_delete(ptr, depth, key),
+
+            art_nodes::ArtNodeEnum::Inner16(ptr) => Self::internal_node_delete(ptr, depth, key),
+
+            art_nodes::ArtNodeEnum::Inner48(ptr) => Self::internal_node_delete(ptr, depth, key),
+
+            art_nodes::ArtNodeEnum::Inner256(ptr) => Self::internal_node_delete(ptr, depth, key),
+
+            leaf => (art_nodes::ArtNodeEnum::Empty, Self::leaf_node_delete(leaf, key)),
+        };
+
+        *root = new_root;
+        ret
+    }
+
+    pub fn delete_key(&mut self, key: &K) -> Option<V> {
+        self.size -= 1;
+        Self::delete_record(&mut self.root, 0, key)
     }
 }

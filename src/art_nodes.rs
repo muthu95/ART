@@ -19,7 +19,14 @@ impl<K: key_interface::KeyInterface, V> ArtNodeEnum<K, V> {
     pub fn key(&self) -> &K {
         match self {
             &ArtNodeEnum::LeafNode(ref ptr) => &ptr.0,
-            _ => panic!("Does not contain key"),
+            _ => panic!("Not a leaf node. Hence Key not found"),
+        }
+    }
+
+    pub fn value(self) -> V {
+        match self {
+            ArtNodeEnum::LeafNode(ptr) => ptr.1,
+            _ => panic!("Not a leaf node. Hence Value not found"),
         }
     }
 

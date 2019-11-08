@@ -1,9 +1,8 @@
-
-
 use std;
 use std::{mem, ptr};
 use crate::constants;
 use crate::node256;
+use crate::node16;
 use crate::key_interface;
 use crate::art_node_base;
 use crate::art_nodes;
@@ -100,5 +99,32 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
 
     fn has_child(&self, byte: u8) -> bool {
         self.keys[byte as usize] != constants::EMPTY_CELL
+    }
+
+    fn clean_child(&mut self, byte: u8) -> bool {
+        self.keys[byte as usize] = constants::EMPTY_CELL;
+        self.n.num_children -= 1;
+        self.n.num_children <= 10
+    }
+
+    fn shrink(mut self) -> art_nodes::ArtNodeEnum<K,V> {
+        let mut new_node = Box::new(node16::NodeType16::new());
+        new_node.n.partial_len = self.n.partial_len;
+
+        unsafe {
+            ptr::copy_nonoverlapping(
+                self.n.partial.as_ptr(),
+                new_node.n.partial.as_mut_ptr(),
+                self.n.partial.len());
+        }
+
+        for i in 0..256 {
+            if self.keys[i] != constants::EMPTY_CELL {
+                let child = std::mem::replace(&mut self.children[self.keys[i] as usize - 1], art_nodes::ArtNodeEnum::Empty);
+                new_node.add_child(child, i as u8);
+            }
+        }
+
+        art_nodes::ArtNodeEnum::Inner16(new_node)
     }
 }

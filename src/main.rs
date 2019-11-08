@@ -16,19 +16,34 @@ fn main() {
 
 fn short_string_test() {
     let mut art: art_tree::Art<String, u32> = art_tree::Art::new();
-    let s = String::from("randomString1000");
-    let p = String::from("MuthuMM");
+    let s = String::from("randomString11");
+    let p = String::from("randomString12");
 
-    for i in 1..1000 {
-        let mut randomString = "randomString".to_string();
-        let mut variable = i.to_string();
-        randomString.push_str(&variable);
-        art.insert(randomString.clone(), i);
-        println!("Inserting string completed {}", randomString);
+    for i in 1..20 {
+        let mut random_string = "randomString".to_string();
+        let variable = i.to_string();
+        random_string.push_str(&variable);
+        art.insert_key(random_string.clone(), i);
+        println!("Inserting string completed {}", random_string);
     }
 
     match art.get(&s) {
         Some(a) => println!("Recieved {}", a),
         None => println!("None val returned"),
     }
+
+    art.delete_key(&s);
+
+    match art.get(&s) {
+        Some(a) => println!("Recieved {}", a),
+        None => println!("None val returned"),
+    }
+
+    art.delete_key(&p);
+
+    match art.get(&p) {
+        Some(a) => println!("Recieved {}", a),
+        None => println!("None val returned"),
+    }
+
 }

@@ -11,4 +11,6 @@ pub trait ArtNodeInterface<K, V> {
     fn has_child(&self, byte: u8) -> bool;
     fn find_child(&self, byte: u8) -> Option<&art_nodes::ArtNodeEnum<K, V>>;
     fn find_child_mut(&mut self, byte: u8) -> &mut art_nodes::ArtNodeEnum<K, V>;
+    fn shrink(self) -> art_nodes::ArtNodeEnum<K,V>;
+    fn clean_child(&mut self, byte: u8) -> bool;
 }

@@ -5,6 +5,7 @@ use crate::key_interface;
 use crate::art_node_base;
 use crate::art_nodes;
 use crate::art_node_interface;
+use crate::constants;
 
 pub struct NodeType4<K, V> {
     pub n: art_node_base::ArtNodeBase,
@@ -103,5 +104,24 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
             }
         }
         panic!("No requested child");
+    }
+
+    fn clean_child(&mut self, byte: u8) -> bool {
+        for i in 0..self.n.num_children {
+            if self.keys[i as usize] == byte {
+                self.keys[i as usize] = constants::EMPTY_CELL;
+                self.n.num_children -= 1;
+
+                self.children.swap(i as usize, self.n.num_children as usize);
+                self.keys.swap(i as usize, self.n.num_children as usize);
+
+                return self.n.num_children == 0;
+            }
+        }
+        panic!("Removing child not found");
+    }
+
+    fn shrink(self) -> art_nodes::ArtNodeEnum<K,V> {
+        art_nodes::ArtNodeEnum::Empty
     }
 }

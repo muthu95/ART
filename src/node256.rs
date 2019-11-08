@@ -1,11 +1,11 @@
-
-
 use std;
+use std::{mem, ptr};
 
 use crate::key_interface;
 use crate::art_node_base;
 use crate::art_nodes;
 use crate::art_node_interface;
+use crate::node48;
 
 macro_rules! make_array {
     ($n:expr, $constructor:expr) => {{
@@ -75,5 +75,34 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
             art_nodes::ArtNodeEnum::Empty => false,
             _ => true,
         }
+    }
+
+    fn clean_child(&mut self, _byte: u8) -> bool {
+        self.n.num_children -= 1;
+        self.n.num_children <= 40
+    }
+
+    fn shrink(mut self) -> art_nodes::ArtNodeEnum<K,V> {
+        // TODO: several lines here basically same for all the nodes
+        //       try to dedupe somehow.
+        //
+        let mut new_node = Box::new(node48::NodeType48::new());
+        new_node.n.partial_len = self.n.partial_len;
+
+        unsafe {
+            ptr::copy_nonoverlapping(
+                self.n.partial.as_ptr(),
+                new_node.n.partial.as_mut_ptr(),
+                self.n.partial.len());
+        }
+
+        for i in 0..256 {
+            match mem::replace(&mut self.children[i], art_nodes::ArtNodeEnum::Empty) {
+                art_nodes::ArtNodeEnum::Empty => continue,
+                node => new_node.add_child(node, i as u8),
+            }
+        }
+
+        art_nodes::ArtNodeEnum::Inner48(new_node)
     }
 }
