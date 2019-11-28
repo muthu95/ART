@@ -20,112 +20,106 @@ impl<'a, K: 'a + key_interface::KeyInterface + std::cmp::PartialEq, V> Art<K, V>
         }
     }
 
-    fn split_node<N: ArtNodeInterface<K, V>>(
-        mut ptr: Box<N>,
-        prefix_match_len: usize,
-        depth: usize,
-        key: K,
-        value: V,
-    ) -> art_nodes::ArtNodeEnum<K, V> {
-        let mut new_node = Box::new(node4::NodeType4::new());
-
-        let next_byte_leaf = key.bytes()[depth + prefix_match_len];
-        let next_byte_inner = ptr.base().partial[prefix_match_len];
-
-        new_node.n.partial_len = prefix_match_len;
-
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                ptr.base().partial.as_ptr(),
-                new_node.n.partial.as_mut_ptr(),
-                new_node.n.partial.len());
-
-            let copy_len = ptr.base().partial_len - prefix_match_len - 1;
-            let src = ptr.base().partial[prefix_match_len+1..ptr.base().partial_len].as_ptr();
-            let dst = ptr.mut_base().partial[..copy_len].as_mut_ptr();
-            std::ptr::copy(src, dst, copy_len);
+    fn split_node<N: ArtNodeInterface<K,V>>(mut ptr: Box<N>, prefix_match_len: usize, depth: usize, key: K, value: V, existing_key_bytes: &[u8]) -> art_nodes::ArtNodeEnum<K, V> {
+        //println!("****** {}", String::from_utf8_lossy(existing_key_bytes));
+        let mut new_node = Box::new(node4::NodeType4::new());      
+        new_node.mut_base().partial_len = prefix_match_len;
+        let mut i: usize = 0;
+        while i < prefix_match_len && i < constants::PREFIX_LENGTH_LIMIT {
+            new_node.mut_base().partial[i] = existing_key_bytes[i];
+            i += 1;
         }
 
-        ptr.mut_base().partial_len -= prefix_match_len + 1;
+        let next_byte_inner = existing_key_bytes[prefix_match_len];
 
-        new_node.add_child(ptr.to_art_node(), next_byte_inner);
+        i = 0;
+        while i < constants::PREFIX_LENGTH_LIMIT && (prefix_match_len + 1 + i) < ptr.base().partial_len {
+            ptr.mut_base().partial[i] = existing_key_bytes[prefix_match_len + 1 + i];
+            //println!("^^^ {}", existing_key_bytes[prefix_match_len + 1 + i] as char);
+            i += 1;
+        }
+        ptr.mut_base().partial_len = ptr.base().partial_len - (prefix_match_len + 1);
+        let target = std::cmp::min(ptr.base().partial_len, constants::PREFIX_LENGTH_LIMIT);
+        println!("Split node, partialKey: {}", String::from_utf8_lossy(&ptr.base().partial[0..target]));
+        //println!("Split node, partialKeyLen: {}", ptr.base().partial_len);
+        
+        let next_byte_leaf = key.bytes()[depth + prefix_match_len];
         new_node.add_child(art_nodes::ArtNodeEnum::create_leaf(key, value), next_byte_leaf);
-
+        new_node.add_child(ptr.to_art_node(), next_byte_inner);
+    
         art_nodes::ArtNodeEnum::Inner4(new_node)
     }
 
-    fn internal_node_insert<N>(mut ptr: Box<N>, depth: usize, key: K, value: V) -> art_nodes::ArtNodeEnum<K, V>
-        where N: ArtNodeInterface<K,V>
-    {
+    fn internal_node_insert<N: ArtNodeInterface<K,V>>(mut ptr: Box<N>, mut depth: usize, key: K, value: V) -> art_nodes::ArtNodeEnum<K, V> {
         let prefix_match_len = ptr.base().compute_prefix_match(&key, depth);
+        let actual_partial_len = ptr.base().partial_len;
+        println!("INTERNAL INSERT, prefix_match_len: {}, actual_prefix_len: {}", prefix_match_len, actual_partial_len);
+        let target = std::cmp::min(constants::PREFIX_LENGTH_LIMIT, actual_partial_len);
+        if prefix_match_len != target {
+            let extended_key = Self::find_minimum(&ptr).key();
+            let extended_key_bytes = extended_key.bytes().to_vec();
+            return Self::split_node(ptr, prefix_match_len, depth, key, value, &extended_key_bytes);
+        } else if prefix_match_len == constants::PREFIX_LENGTH_LIMIT {
+            let extended_key = Self::find_minimum(&ptr).key();
+            let key_bytes = key.bytes();
+            let extended_key_bytes = extended_key.bytes().to_vec();
+            let mut lcp = depth + prefix_match_len;
 
-        if prefix_match_len != ptr.base().partial_len {
-            Self::split_node(ptr, prefix_match_len, depth, key, value)
-        } else {
-            let next_byte = key.bytes()[depth + prefix_match_len];
-
-            if ptr.has_child(next_byte) {
-                {
-                    let child = ptr.find_child_mut(next_byte);
-                    Self::insert_record(child, depth + prefix_match_len + 1, key, value);
-                }
-                ptr.to_art_node()
-            } else if ptr.is_full() {
-                ptr.grow_and_add(art_nodes::ArtNodeEnum::create_leaf(key, value), next_byte)
-            } else {
-                ptr.add_child(art_nodes::ArtNodeEnum::create_leaf(key, value), next_byte);
-                ptr.to_art_node()
+            //Assuming keys are of same length
+            while lcp < actual_partial_len && extended_key_bytes[lcp] == key_bytes[lcp] {
+                lcp += 1;
             }
+            println!("INTERNAL INSERT, extended prefix_match_len: {}", lcp);
+            if lcp != actual_partial_len {
+                return Self::split_node(ptr, lcp, depth, key, value, &extended_key_bytes);
+            }
+        }
+        //Adding partial_len with assumption that keys are of same length.
+        depth += actual_partial_len;
+        let next_byte = key.bytes()[depth];
+        match ptr.find_child_mut(next_byte) {
+            Some(child) => {
+                Self::insert_record(child, depth + 1, key, value);
+                return ptr.to_art_node()
+            },
+            None => {
+                if ptr.is_full() {
+                    return ptr.grow_and_add(art_nodes::ArtNodeEnum::create_leaf(key, value), next_byte)
+                } else {
+                    ptr.add_child(art_nodes::ArtNodeEnum::create_leaf(key, value), next_byte);
+                    return ptr.to_art_node()
+                }
+            },
         }
     }
 
-    fn leaf_node_insert(lleaf: art_nodes::ArtNodeEnum<K,V>, key: K, value: V, depth: usize) -> art_nodes::ArtNodeEnum<K,V> {
-        if *lleaf.key() == key {
+    fn leaf_node_insert(leaf_node: art_nodes::ArtNodeEnum<K,V>, key: K, value: V, mut depth: usize) -> art_nodes::ArtNodeEnum<K,V> {
+        if *leaf_node.key() == key {
+            //If node with same key already exists, then update the value
             return art_nodes::ArtNodeEnum::create_leaf(key, value);
         }
 
         let mut new_node = Box::new(node4::NodeType4::new());
-
-        let (lnext, rnext) = {
-            let lkey = lleaf.key();
-
-            let mut lcp = depth;
-            let mut max_lcp = std::cmp::min(constants::PREFIX_LENGTH_LIMIT, key.bytes().len());
-            max_lcp = std::cmp::min(max_lcp, lkey.bytes().len());
-
-            while lcp < max_lcp && lkey.bytes()[lcp] == key.bytes()[lcp] {
-                lcp += 1;
+        let key2 = leaf_node.key();
+        let mut lcp = depth;
+        //Assuming keys are of same length.
+        while lcp < key.bytes().len() && key2.bytes()[lcp] == key.bytes()[lcp] {
+            if lcp - depth < constants::PREFIX_LENGTH_LIMIT {
+                new_node.base_struct.partial[lcp-depth] = key.bytes()[lcp];
             }
-
-            println!("lcp value is {}",lcp);
-            if lcp > depth {
-                unsafe {
-                    std::ptr::copy(
-                        key.bytes()[depth..].as_ptr(),
-                        new_node.n.partial.as_mut_ptr(),
-                        lcp - depth
-                    );
-                }
-            }
-
-            new_node.n.partial_len = lcp - depth;
-            if lcp == max_lcp {
-                lcp = lcp - 1;
-            }
-
-            if lcp >= lkey.bytes().len() {
-                lcp = lkey.bytes().len() - 1;
-            }
-
-            if lcp >= key.bytes().len() {
-                lcp = key.bytes().len() - 1;
-            }
-            (lkey.bytes()[lcp], key.bytes()[lcp])
-        };
-
-        let rleaf = art_nodes::ArtNodeEnum::create_leaf(key, value);
-        new_node.add_child(lleaf, lnext);
-        new_node.add_child(rleaf, rnext);
+            lcp += 1;
+        }
+        new_node.mut_base().partial_len = lcp - depth;
+        //println!("lcp: {}, depth: {}, New node's partial_len: {}", lcp, depth, lcp-depth);
+        let target = std::cmp::min(new_node.base().partial_len, constants::PREFIX_LENGTH_LIMIT);
+        //println!("New node's partial key: {}", String::from_utf8_lossy(&new_node.base().partial[0..target]));
+        depth += new_node.base().partial_len;
+        
+        let left_idx = key.bytes()[depth];
+        let right_idx = key2.bytes()[depth];
+        let new_leaf_node = art_nodes::ArtNodeEnum::create_leaf(key, value);
+        new_node.add_child(new_leaf_node, left_idx);
+        new_node.add_child(leaf_node, right_idx);
         art_nodes::ArtNodeEnum::Inner4(new_node)
     }
 
@@ -136,7 +130,7 @@ impl<'a, K: 'a + key_interface::KeyInterface + std::cmp::PartialEq, V> Art<K, V>
             art_nodes::ArtNodeEnum::Inner16(ptr) => Self::internal_node_insert(ptr, depth, key, value),
             art_nodes::ArtNodeEnum::Inner48(ptr) => Self::internal_node_insert(ptr, depth, key, value),
             art_nodes::ArtNodeEnum::Inner256(ptr) => Self::internal_node_insert(ptr, depth, key, value),
-            leaf => Self::leaf_node_insert(leaf, key, value, depth),
+            leaf_node => Self::leaf_node_insert(leaf_node, key, value, depth),
         };
     }
 
@@ -145,36 +139,50 @@ impl<'a, K: 'a + key_interface::KeyInterface + std::cmp::PartialEq, V> Art<K, V>
         self.size += 1;
     }
 
-    #[inline]
-    fn search_inner<N: ArtNodeInterface<K,V>>(ptr: &'a N, key: &K, depth: usize) -> Option<&'a V> {
-        let lcp = ptr.base().compute_prefix_match(key, depth);
+    fn find_minimum<N: ArtNodeInterface<K,V>>(ptr: &Box<N>) -> &art_nodes::ArtNodeEnum<K,V> {
+        let x = ptr.get_minimum();
+        match x {
+            art_nodes::ArtNodeEnum::Inner4(ref p) => Self::find_minimum(p),
+            art_nodes::ArtNodeEnum::Inner16(ref p) => Self::find_minimum(p),
+            art_nodes::ArtNodeEnum::Inner48(ref p) => Self::find_minimum(p),
+            art_nodes::ArtNodeEnum::Inner256(ref p) => Self::find_minimum(p),
+            _ => x,
+        }
+    }
 
-        if lcp != ptr.base().partial_len {
+    /*
+    --------SEARCH-----------
+    */
+    #[inline]
+    fn search_inner<N: ArtNodeInterface<K,V>>(ptr: &'a N, key: &K, mut depth: usize) -> Option<&'a V> {
+        println!("SEARCH: partial_len: {}, depth: {}", ptr.base().partial_len, depth);
+
+        let target = std::cmp::min(constants::PREFIX_LENGTH_LIMIT, ptr.base().partial_len);
+        if ptr.base().compute_prefix_match(key, depth) != target {
             return None;
         }
 
-        if let Some(ref child) = ptr.find_child(key.bytes()[depth + lcp]) {
-            return Self::search_rec(child, key, depth + lcp + 1);
+        depth = depth + ptr.base().partial_len;
+        match ptr.find_child(key.bytes()[depth]) {
+            Some(child) => Self::search_rec(child, key, depth + 1),
+            None => None,
         }
-
-        None
     }
 
     fn search_rec(root: &'a art_nodes::ArtNodeEnum<K,V>, key: &K, depth: usize) -> Option<&'a V> {
         match root {
-            &art_nodes::ArtNodeEnum::Empty => None,
-            &art_nodes::ArtNodeEnum::LeafNode(ref ptr) => if ptr.0 == *key {
-                Some(&ptr.1)
-            } else {
-                None
+            art_nodes::ArtNodeEnum::Empty => None,
+            art_nodes::ArtNodeEnum::LeafNode(ref ptr) => {
+                if ptr.0 == *key {
+                    Some(&ptr.1)
+                } else {
+                    None
+                }
             }
-            &art_nodes::ArtNodeEnum::Inner4(ref ptr) => Self::search_inner(&**ptr, key, depth),
-
-            &art_nodes::ArtNodeEnum::Inner16(ref ptr) => Self::search_inner(&**ptr, key, depth),
-
-            &art_nodes::ArtNodeEnum::Inner48(ref ptr) => Self::search_inner(&**ptr, key, depth),
-
-            &art_nodes::ArtNodeEnum::Inner256(ref ptr) => Self::search_inner(&**ptr, key, depth),
+            art_nodes::ArtNodeEnum::Inner4(ref ptr) => Self::search_inner(&**ptr, key, depth),
+            art_nodes::ArtNodeEnum::Inner16(ref ptr) => Self::search_inner(&**ptr, key, depth),
+            art_nodes::ArtNodeEnum::Inner48(ref ptr) => Self::search_inner(&**ptr, key, depth),
+            art_nodes::ArtNodeEnum::Inner256(ref ptr) => Self::search_inner(&**ptr, key, depth),
         }
     }
 
@@ -182,7 +190,7 @@ impl<'a, K: 'a + key_interface::KeyInterface + std::cmp::PartialEq, V> Art<K, V>
         Self::search_rec(&self.root, key, 0)
     }
 
-    fn leaf_node_delete(leaf: art_nodes::ArtNodeEnum<K,V>, key: &K) -> Option<V> {
+    /*fn leaf_node_delete(leaf: art_nodes::ArtNodeEnum<K,V>, key: &K) -> Option<V> {
         if *key == *leaf.key() {
             Some(leaf.value())
         } else {
@@ -238,7 +246,10 @@ impl<'a, K: 'a + key_interface::KeyInterface + std::cmp::PartialEq, V> Art<K, V>
     }
 
     pub fn delete_key(&mut self, key: &K) -> Option<V> {
-        self.size -= 1;
-        Self::delete_record(&mut self.root, 0, key)
-    }
+        let del_result = Self::delete_record(&mut self.root, 0, key);
+        if del_result.is_some() {
+            self.size -= 1;
+        }
+        del_result
+    }*/
 }

@@ -18,7 +18,7 @@ macro_rules! make_array {
 }
 
 pub struct NodeType256<K, V> {
-    pub n: art_node_base::ArtNodeBase,
+    pub base_struct: art_node_base::ArtNodeBase,
     pub children: [art_nodes::ArtNodeEnum<K, V>; 256],
 }
 
@@ -26,21 +26,20 @@ pub struct NodeType256<K, V> {
 impl<K, V> NodeType256<K, V> {
     pub fn new() -> Self {
         NodeType256 {
-            n: art_node_base::ArtNodeBase::new(),
+            base_struct: art_node_base::ArtNodeBase::new(),
             children: unsafe {make_array!(256, art_nodes::ArtNodeEnum::Empty) }
         }
     }
 }
 
-
 impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, V> for NodeType256<K, V> {
     fn add_child(&mut self, child: art_nodes::ArtNodeEnum<K, V>, byte: u8) {
-        self.n.num_children += 1;
         self.children[byte as usize] = child;
+        self.base_struct.num_children += 1;
     }
 
     fn is_full(&self) -> bool {
-        self.n.num_children >= 256
+        self.base_struct.num_children >= 256
     }
 
     fn to_art_node(self: Box<Self>) -> art_nodes::ArtNodeEnum<K,V> {
@@ -52,34 +51,37 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
     }
 
     fn mut_base(&mut self) -> &mut art_node_base::ArtNodeBase {
-        &mut self.n
+        &mut self.base_struct
     }
 
     fn base(&self) -> &art_node_base::ArtNodeBase {
-        &self.n
+        &self.base_struct
     }
 
-    fn find_child_mut(&mut self, byte: u8) -> &mut art_nodes::ArtNodeEnum<K, V> {
-        &mut self.children[byte as usize]
+    fn find_child_mut(&mut self, byte: u8) -> Option<&mut art_nodes::ArtNodeEnum<K, V>> {
+        match &self.children[byte as usize] {
+            art_nodes::ArtNodeEnum::Empty => None,
+            _ => Some(&mut self.children[byte as usize]),
+        }
     }
 
     fn find_child(&self, byte: u8) -> Option<&art_nodes::ArtNodeEnum<K, V>> {
         match &self.children[byte as usize] {
-            &art_nodes::ArtNodeEnum::Empty => None,
-            value => Some(value),
+            art_nodes::ArtNodeEnum::Empty => None,
+            value => Some(&value),
         }
     }
 
     fn has_child(&self, byte: u8) -> bool {
-        match self.children[byte as usize] {
+        match &self.children[byte as usize] {
             art_nodes::ArtNodeEnum::Empty => false,
             _ => true,
         }
     }
 
     fn clean_child(&mut self, _byte: u8) -> bool {
-        self.n.num_children -= 1;
-        self.n.num_children <= 40
+        self.base_struct.num_children -= 1;
+        self.base_struct.num_children <= 40
     }
 
     fn shrink(mut self) -> art_nodes::ArtNodeEnum<K,V> {
@@ -87,13 +89,13 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
         //       try to dedupe somehow.
         //
         let mut new_node = Box::new(node48::NodeType48::new());
-        new_node.n.partial_len = self.n.partial_len;
+        new_node.base_struct.partial_len = self.base_struct.partial_len;
 
         unsafe {
             ptr::copy_nonoverlapping(
-                self.n.partial.as_ptr(),
-                new_node.n.partial.as_mut_ptr(),
-                self.n.partial.len());
+                self.base_struct.partial.as_ptr(),
+                new_node.base_struct.partial.as_mut_ptr(),
+                self.base_struct.partial.len());
         }
 
         for i in 0..256 {
@@ -105,4 +107,20 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
 
         art_nodes::ArtNodeEnum::Inner48(new_node)
     }
+
+    fn get_minimum(&self) -> &art_nodes::ArtNodeEnum<K,V> {
+        let idx = get_first_non_empty_cell(&self.children);
+        &self.children[idx]
+    }
+}
+
+fn get_first_non_empty_cell<K, V>(children_arr: &[art_nodes::ArtNodeEnum<K, V>; 256]) -> usize {
+    let mut i: usize = 0;
+    while i < 256 {
+        match &children_arr[i] {
+            art_nodes::ArtNodeEnum::Empty => i += 1,
+            _ => break,
+        }
+    }
+    i
 }

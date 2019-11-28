@@ -1,6 +1,6 @@
-
 use std;
 use std::{mem, ptr};
+use std::mem::MaybeUninit;
 use crate::node48;
 use crate::node4;
 use crate::key_interface;
@@ -9,65 +9,84 @@ use crate::art_nodes;
 use crate::art_node_interface;
 use crate::constants;
 
+macro_rules! make_array {
+    ($n:expr, $constructor:expr) => {{
+        let mut items: [_; $n] = std::mem::uninitialized();
+        for place in items.iter_mut() {
+            std::ptr::write(place, $constructor);
+        }
+        items
+    }}
+}
+
 pub struct NodeType16<K, V> {
-    pub n: art_node_base::ArtNodeBase,
+    pub base_struct: art_node_base::ArtNodeBase,
     pub keys: mem::ManuallyDrop<[u8; 16]>,
     pub children: mem::ManuallyDrop<[art_nodes::ArtNodeEnum<K, V>; 16]>,
 }
 
-
 impl<K, V> NodeType16<K, V> {
     pub fn new() -> Self {
         NodeType16 {
-            n: art_node_base::ArtNodeBase::new(),
-            keys: unsafe { mem::uninitialized() },
-            children: unsafe { mem::uninitialized() }
+            base_struct: art_node_base::ArtNodeBase::new(),
+            keys: unsafe { MaybeUninit::uninit().assume_init() },
+            children: unsafe {mem::ManuallyDrop::new(make_array!(16, art_nodes::ArtNodeEnum::Empty))},
         }
     }
 }
 
 impl<K,V> Drop for NodeType16<K,V> {
     fn drop(&mut self) {
-        for i in 0..self.n.num_children {
+        for i in 0..self.base_struct.num_children {
             drop(&mut self.children[i as usize]);
         }
     }
 }
 
 impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, V> for NodeType16<K, V> {
+    
     fn add_child(&mut self, child: art_nodes::ArtNodeEnum<K, V>, byte: u8) {
-        let idx = self.n.num_children as usize;
-        unsafe {
-            ptr::write(&mut self.children[idx] as *mut art_nodes::ArtNodeEnum<K,V>, child);
-            ptr::write(&mut self.keys[idx] as *mut u8, byte);
+        let idx = get_sorted_index(byte, &self.keys, self.base_struct.num_children);
+        //println!("Pos in sorted order is: {}", idx);
+
+        //Shifting elements to the right by 1
+        let mut i = self.base_struct.num_children as usize;
+        while i > idx {
+            let temp = mem::replace(&mut self.children[i-1], art_nodes::ArtNodeEnum::Empty);
+            self.children[i] = temp;
+            self.keys[i] = self.keys[i-1];
+            i -= 1;
         }
-        self.n.num_children += 1;
+
+        //Adding the key & child in correct sorted position
+        self.keys[idx] = byte;
+        self.children[idx] = child;
+        //unsafe { ptr::write(&mut self.children[idx] as *mut art_nodes::ArtNodeEnum<K,V>, child); }
+        
+        self.base_struct.num_children += 1;
     }
 
     fn grow_and_add(mut self, leaf: art_nodes::ArtNodeEnum<K, V>, byte: u8) -> art_nodes::ArtNodeEnum<K, V> {
-        let mut new_node = Box::new(node48::NodeType48::new());
         println!("creating node48");
-        new_node.n.partial_len = self.n.partial_len;
-
-        unsafe {
-            ptr::copy_nonoverlapping(
-                self.n.partial.as_ptr(),
-                new_node.n.partial.as_mut_ptr(),
-                self.n.partial.len());
+        let mut new_node = Box::new(node48::NodeType48::new());
+        
+        new_node.base_struct.partial_len = self.base_struct.partial_len;
+        let mut i: usize = 0;
+        while i < self.base_struct.partial_len && i < constants::PREFIX_LENGTH_LIMIT {
+            new_node.base_struct.partial[i] = self.base_struct.partial[i];
+            i += 1;
         }
 
         new_node.add_child(leaf, byte);
-
         for i in 0..16 {
             let child = std::mem::replace(&mut self.children[i], art_nodes::ArtNodeEnum::Empty);
             new_node.add_child(child, self.keys[i]);
         }
-
         art_nodes::ArtNodeEnum::Inner48(new_node)
     }
 
     fn is_full(&self) -> bool {
-        self.n.num_children >= 16
+        self.base_struct.num_children >= 16
     }
 
     fn to_art_node(self: Box<Self>) -> art_nodes::ArtNodeEnum<K,V> {
@@ -75,24 +94,24 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
     }
 
     fn mut_base(&mut self) -> &mut art_node_base::ArtNodeBase {
-        &mut self.n
+        &mut self.base_struct
     }
 
     fn base(&self) -> &art_node_base::ArtNodeBase {
-        &self.n
+        &self.base_struct
     }
 
-    fn find_child_mut(&mut self, byte: u8) -> &mut art_nodes::ArtNodeEnum<K, V> {
-        for i in 0..self.n.num_children {
+    fn find_child_mut(&mut self, byte: u8) -> Option<&mut art_nodes::ArtNodeEnum<K, V>> {
+        for i in 0..self.base_struct.num_children {
             if self.keys[i as usize] == byte {
-                return &mut self.children[i as usize];
+                return Some(&mut self.children[i as usize]);
             }
         }
-        panic!("No requested child");
+        None
     }
 
     fn find_child(&self, byte: u8) -> Option<&art_nodes::ArtNodeEnum<K, V>> {
-        for i in 0..self.n.num_children {
+        for i in 0..self.base_struct.num_children {
             if self.keys[i as usize] == byte {
                 return Some(&self.children[i as usize]);
             }
@@ -101,7 +120,7 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
     }
 
     fn has_child(&self, byte: u8) -> bool {
-        for i in 0..self.n.num_children {
+        for i in 0..self.base_struct.num_children {
             if self.keys[i as usize] == byte {
                 return true;
             }
@@ -110,15 +129,15 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
     }
 
     fn clean_child(&mut self, byte: u8) -> bool {
-        for i in 0..self.n.num_children {
+        for i in 0..self.base_struct.num_children {
             if self.keys[i as usize] == byte {
                 self.keys[i as usize] = constants::EMPTY_CELL;
-                self.n.num_children -= 1;
+                self.base_struct.num_children -= 1;
 
-                self.children.swap(i as usize, self.n.num_children as usize);
-                self.keys.swap(i as usize, self.n.num_children as usize);
+                self.children.swap(i as usize, self.base_struct.num_children as usize);
+                self.keys.swap(i as usize, self.base_struct.num_children as usize);
 
-                return self.n.num_children <= 2
+                return self.base_struct.num_children <= 2
             }
         }
         panic!("Removing child not found");
@@ -127,20 +146,32 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
     fn shrink(mut self) -> art_nodes::ArtNodeEnum<K,V> {
         let mut new_node = Box::new(node4::NodeType4::new());
 
-        new_node.n.partial_len = self.n.partial_len;
+        new_node.base_struct.partial_len = self.base_struct.partial_len;
 
         unsafe {
             ptr::copy_nonoverlapping(
-                self.n.partial.as_ptr(),
-                new_node.n.partial.as_mut_ptr(),
-                self.n.partial.len());
+                self.base_struct.partial.as_ptr(),
+                new_node.base_struct.partial.as_mut_ptr(),
+                self.base_struct.partial.len());
         }
 
-        for i in 0..self.n.num_children {
+        for i in 0..self.base_struct.num_children {
             let child = std::mem::replace(&mut self.children[i as usize], art_nodes::ArtNodeEnum::Empty);
             new_node.add_child(child, self.keys[i as usize]);
         }
 
         art_nodes::ArtNodeEnum::Inner4(new_node)
     }
+
+    fn get_minimum(&self) -> &art_nodes::ArtNodeEnum<K,V> {
+        &self.children[0]
+    }
+}
+
+fn get_sorted_index(byte: u8, byte_arr: &[u8; 16], num_children: u16) -> usize {
+    let mut i:usize = 0;
+    while i < num_children as usize && byte > byte_arr[i] {
+        i += 1;
+    }
+    i
 }

@@ -1,2 +1,4 @@
 /target
 **/*.rs.bk
+src/useless_backup
+.gitignore

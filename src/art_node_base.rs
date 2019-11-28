@@ -1,12 +1,13 @@
 use std;
-use std::mem;
+use std::mem::MaybeUninit;
+use crate::constants;
 
 use crate::key_interface;
 
 pub struct ArtNodeBase {
     pub num_children: u16,
     pub partial_len: usize,
-    pub partial: [u8; 8],
+    pub partial: [u8; constants::PREFIX_LENGTH_LIMIT],
 }
 
 impl ArtNodeBase {
@@ -14,16 +15,17 @@ impl ArtNodeBase {
         ArtNodeBase {
             num_children: 0,
             partial_len: 0,
-            partial: unsafe { mem::uninitialized() }
+            partial: unsafe { MaybeUninit::uninit().assume_init() }
         }
     }
 
     pub fn compute_prefix_match<K: key_interface::KeyInterface>(&self, key: &K, depth: usize) -> usize {
-        for i in 0..self.partial_len {
+        let limit = std::cmp::min(self.partial_len, constants::PREFIX_LENGTH_LIMIT);
+        for i in 0..limit {
             if key.bytes()[i + depth] != self.partial[i] {
                 return i;
             }
         }
-        self.partial_len
+        limit
     }
 }
