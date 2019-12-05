@@ -128,19 +128,55 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
         false
     }
 
-    fn clean_child(&mut self, byte: u8) -> bool {
-        for i in 0..self.base_struct.num_children {
-            if self.keys[i as usize] == byte {
-                self.keys[i as usize] = constants::EMPTY_CELL;
-                self.base_struct.num_children -= 1;
-
-                self.children.swap(i as usize, self.base_struct.num_children as usize);
-                self.keys.swap(i as usize, self.base_struct.num_children as usize);
-
-                return self.base_struct.num_children <= 2
+    fn remove_child(mut self, byte: u8) -> art_nodes::ArtNodeEnum<K, V> {
+        let mut i = 0;
+        let curr_children_count = self.base().num_children as usize;
+        if curr_children_count == 5 {
+            println!("Reducing node16 to node4");
+            let mut new_node = Box::new(node4::NodeType4::new());
+            new_node.mut_base().partial_len = self.base().partial_len;
+            while i < self.base().partial.len() {
+                new_node.mut_base().partial[i] = self.base().partial[i];
+                i += 1;
             }
+            i = 0;
+            while i < curr_children_count {
+                if self.keys[i as usize] != byte {
+                    let temp = mem::replace(&mut self.children[i as usize], art_nodes::ArtNodeEnum::Empty);
+                    new_node.add_child(temp, self.keys[i as usize]);
+                }
+                i += 1;
+            }
+            new_node.to_art_node()
+        } else {
+            while i < curr_children_count {
+                if self.keys[i as usize] == byte {
+                    break;
+                }
+                i += 1;
+            }
+            while i < (curr_children_count - 1) {
+                self.keys[i as usize] = self.keys[(i+1) as usize];
+                let temp = mem::replace(&mut self.children[(i+1) as usize], art_nodes::ArtNodeEnum::Empty);
+                self.children[i as usize] = temp;
+                i += 1;
+            }
+            self.children[(curr_children_count - 1) as usize] = art_nodes::ArtNodeEnum::Empty;
+            self.mut_base().num_children -= 1;
+            Box::new(self).to_art_node()
         }
-        panic!("Removing child not found");
+    }
+
+    fn replace_child(&mut self, byte: u8, child: art_nodes::ArtNodeEnum<K, V>) {
+        let mut i = 0;
+        let curr_children_count = self.base().num_children;
+        while i < curr_children_count as usize {
+            if self.keys[i] == byte {
+                self.children[i] = child;
+                break;
+            }
+            i += 1;
+        }
     }
 
     fn shrink(mut self) -> art_nodes::ArtNodeEnum<K,V> {

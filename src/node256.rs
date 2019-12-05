@@ -79,9 +79,42 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
         }
     }
 
-    fn clean_child(&mut self, _byte: u8) -> bool {
-        self.base_struct.num_children -= 1;
-        self.base_struct.num_children <= 40
+    fn remove_child(mut self, byte: u8) -> art_nodes::ArtNodeEnum<K, V> {
+        let curr_children_count = self.base().num_children as usize;
+        if curr_children_count == 49 {
+            println!("Reducing node256 to node48");
+            let mut new_node = Box::new(node48::NodeType48::new());
+            new_node.mut_base().partial_len = self.base().partial_len;
+            let mut i = 0;
+            while i < self.base().partial.len() {
+                new_node.mut_base().partial[i] = self.base().partial[i];
+                i += 1;
+            }
+            i = 0;
+            while i < 256 {
+                if i as u8 == byte {
+                    i += 1;
+                } else {
+                    match self.children[i] {
+                        art_nodes::ArtNodeEnum::Empty => { i += 1; },
+                        _ => {
+                            let temp = mem::replace(&mut self.children[i], art_nodes::ArtNodeEnum::Empty);
+                            new_node.add_child(temp, i as u8);
+                            i += 1;
+                        }
+                    }
+                }
+            }
+            new_node.to_art_node()
+        } else {
+            self.children[byte as usize] = art_nodes::ArtNodeEnum::Empty;
+            self.mut_base().num_children -= 1;
+            Box::new(self).to_art_node()
+        }
+    }
+
+    fn replace_child(&mut self, byte: u8, child: art_nodes::ArtNodeEnum<K, V>) {
+        self.children[byte as usize] = child;
     }
 
     fn shrink(mut self) -> art_nodes::ArtNodeEnum<K,V> {
