@@ -64,7 +64,7 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
     }
 
     fn grow_and_add(mut self, leaf: art_nodes::ArtNodeEnum<K, V>, byte: u8) -> art_nodes::ArtNodeEnum<K, V> {
-        println!("creating node256");
+        //println!("creating node256");
         let mut new_node = Box::new(node256::NodeType256::new());
         
         new_node.base_struct.partial_len = self.base_struct.partial_len;
@@ -108,14 +108,10 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
         }
     }
 
-    fn has_child(&self, byte: u8) -> bool {
-        self.keys[byte as usize] != constants::EMPTY_CELL
-    }
-
     fn remove_child(mut self, byte: u8) -> art_nodes::ArtNodeEnum<K, V> {
         let curr_children_count = self.base().num_children as usize;
         if curr_children_count == 17 {
-            println!("Reducing node48 to node16");
+            //println!("Reducing node48 to node16");
             let mut new_node = Box::new(node16::NodeType16::new());
             new_node.mut_base().partial_len = self.base().partial_len;
             let mut i = 0;
@@ -143,27 +139,6 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
 
     fn replace_child(&mut self, byte: u8, child: art_nodes::ArtNodeEnum<K, V>) {
         self.children[self.keys[byte as usize] as usize - 1] = child;
-    }
-
-    fn shrink(mut self) -> art_nodes::ArtNodeEnum<K,V> {
-        let mut new_node = Box::new(node16::NodeType16::new());
-        new_node.base_struct.partial_len = self.base_struct.partial_len;
-
-        unsafe {
-            ptr::copy_nonoverlapping(
-                self.base_struct.partial.as_ptr(),
-                new_node.base_struct.partial.as_mut_ptr(),
-                self.base_struct.partial.len());
-        }
-
-        for i in 0..256 {
-            if self.keys[i] != constants::EMPTY_CELL {
-                let child = std::mem::replace(&mut self.children[self.keys[i] as usize - 1], art_nodes::ArtNodeEnum::Empty);
-                new_node.add_child(child, i as u8);
-            }
-        }
-
-        art_nodes::ArtNodeEnum::Inner16(new_node)
     }
 
     fn get_minimum(&self) -> &art_nodes::ArtNodeEnum<K,V> {

@@ -65,7 +65,7 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
     }
 
     fn grow_and_add(mut self, leaf: art_nodes::ArtNodeEnum<K, V>, byte: u8) -> art_nodes::ArtNodeEnum<K, V> {
-        println!("creating node16");
+        //println!("creating node16");
         let mut new_node = Box::new(node16::NodeType16::new());
 
         new_node.mut_base().partial_len = self.base_struct.partial_len;
@@ -117,15 +117,6 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
         art_nodes::ArtNodeEnum::Inner4(self)
     }
 
-    fn has_child(&self, byte: u8) -> bool {
-        for i in 0..self.base_struct.num_children {
-            if self.keys[i as usize] == byte {
-                return true;
-            }
-        }
-        false
-    }
-
     //Assumption that child exists
     fn remove_child(mut self: Self, byte: u8) -> art_nodes::ArtNodeEnum<K, V> {
         let mut i = 0;
@@ -173,10 +164,6 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
             }
             i += 1;
         }
-    }
-
-    fn shrink(self) -> art_nodes::ArtNodeEnum<K,V> {
-        art_nodes::ArtNodeEnum::Empty
     }
 
     fn get_minimum(&self) -> &art_nodes::ArtNodeEnum<K,V> {

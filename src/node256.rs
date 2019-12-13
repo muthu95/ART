@@ -72,17 +72,10 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
         }
     }
 
-    fn has_child(&self, byte: u8) -> bool {
-        match &self.children[byte as usize] {
-            art_nodes::ArtNodeEnum::Empty => false,
-            _ => true,
-        }
-    }
-
     fn remove_child(mut self, byte: u8) -> art_nodes::ArtNodeEnum<K, V> {
         let curr_children_count = self.base().num_children as usize;
         if curr_children_count == 49 {
-            println!("Reducing node256 to node48");
+            //println!("Reducing node256 to node48");
             let mut new_node = Box::new(node48::NodeType48::new());
             new_node.mut_base().partial_len = self.base().partial_len;
             let mut i = 0;
@@ -115,30 +108,6 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
 
     fn replace_child(&mut self, byte: u8, child: art_nodes::ArtNodeEnum<K, V>) {
         self.children[byte as usize] = child;
-    }
-
-    fn shrink(mut self) -> art_nodes::ArtNodeEnum<K,V> {
-        // TODO: several lines here basically same for all the nodes
-        //       try to dedupe somehow.
-        //
-        let mut new_node = Box::new(node48::NodeType48::new());
-        new_node.base_struct.partial_len = self.base_struct.partial_len;
-
-        unsafe {
-            ptr::copy_nonoverlapping(
-                self.base_struct.partial.as_ptr(),
-                new_node.base_struct.partial.as_mut_ptr(),
-                self.base_struct.partial.len());
-        }
-
-        for i in 0..256 {
-            match mem::replace(&mut self.children[i], art_nodes::ArtNodeEnum::Empty) {
-                art_nodes::ArtNodeEnum::Empty => continue,
-                node => new_node.add_child(node, i as u8),
-            }
-        }
-
-        art_nodes::ArtNodeEnum::Inner48(new_node)
     }
 
     fn get_minimum(&self) -> &art_nodes::ArtNodeEnum<K,V> {

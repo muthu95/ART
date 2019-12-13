@@ -67,7 +67,7 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
     }
 
     fn grow_and_add(mut self, leaf: art_nodes::ArtNodeEnum<K, V>, byte: u8) -> art_nodes::ArtNodeEnum<K, V> {
-        println!("creating node48");
+        //println!("creating node48");
         let mut new_node = Box::new(node48::NodeType48::new());
         
         new_node.base_struct.partial_len = self.base_struct.partial_len;
@@ -119,20 +119,11 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
         None
     }
 
-    fn has_child(&self, byte: u8) -> bool {
-        for i in 0..self.base_struct.num_children {
-            if self.keys[i as usize] == byte {
-                return true;
-            }
-        }
-        false
-    }
-
     fn remove_child(mut self, byte: u8) -> art_nodes::ArtNodeEnum<K, V> {
         let mut i = 0;
         let curr_children_count = self.base().num_children as usize;
         if curr_children_count == 5 {
-            println!("Reducing node16 to node4");
+            //println!("Reducing node16 to node4");
             let mut new_node = Box::new(node4::NodeType4::new());
             new_node.mut_base().partial_len = self.base().partial_len;
             while i < self.base().partial.len() {
@@ -177,26 +168,6 @@ impl<K: key_interface::KeyInterface, V> art_node_interface::ArtNodeInterface<K, 
             }
             i += 1;
         }
-    }
-
-    fn shrink(mut self) -> art_nodes::ArtNodeEnum<K,V> {
-        let mut new_node = Box::new(node4::NodeType4::new());
-
-        new_node.base_struct.partial_len = self.base_struct.partial_len;
-
-        unsafe {
-            ptr::copy_nonoverlapping(
-                self.base_struct.partial.as_ptr(),
-                new_node.base_struct.partial.as_mut_ptr(),
-                self.base_struct.partial.len());
-        }
-
-        for i in 0..self.base_struct.num_children {
-            let child = std::mem::replace(&mut self.children[i as usize], art_nodes::ArtNodeEnum::Empty);
-            new_node.add_child(child, self.keys[i as usize]);
-        }
-
-        art_nodes::ArtNodeEnum::Inner4(new_node)
     }
 
     fn get_minimum(&self) -> &art_nodes::ArtNodeEnum<K,V> {

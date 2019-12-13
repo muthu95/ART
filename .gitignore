@@ -2,3 +2,4 @@
 **/*.rs.bk
 src/useless_backup
 .gitignore
+.DS_Store
